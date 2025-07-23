@@ -6,11 +6,11 @@ import helpers.waitCondition
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.io.TempDir
 import parser.DelimiterWordParser
+import util.ProgressTracker
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
-import kotlin.io.path.absolutePathString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.seconds
@@ -26,21 +26,21 @@ class FileWatcherTest {
             val directory = FileHelper.createDirectory(tempDir, Paths.get("dir"))
             val file = FileHelper.createOrUpdateFile(tempDir, Paths.get("dir", "a"), "aaa")
 
-            assertEquals(setOf(), filesWatcher.getCurrentlyWatchedSnapshot())
+            assertEquals(setOf(), filesWatcher.getCurrentlyWatchedLive())
             assertEquals(setOf(), filesWatcher.queryIndex("aaa"))
 
-            filesWatcher.startWatching(directory)
+            filesWatcher.startWatching(directory, setOf(), setOf(), ProgressTracker())
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").isNotEmpty() }
-            assertEquals(setOf(directory), filesWatcher.getCurrentlyWatchedSnapshot())
-            assertEquals(setOf(file.toString()), filesWatcher.queryIndex("aaa"))
+            assertEquals(setOf(directory), filesWatcher.getCurrentlyWatchedLive())
+            assertEquals(setOf(file), filesWatcher.queryIndex("aaa"))
 
-            filesWatcher.startWatching(directory)
-            assertEquals(setOf(directory), filesWatcher.getCurrentlyWatchedSnapshot())
-            assertEquals(setOf(file.toString()), filesWatcher.queryIndex("aaa"))
+            filesWatcher.startWatching(directory, setOf(), setOf(), ProgressTracker())
+            assertEquals(setOf(directory), filesWatcher.getCurrentlyWatchedLive())
+            assertEquals(setOf(file), filesWatcher.queryIndex("aaa"))
 
-            filesWatcher.stopWatching(directory)
+            filesWatcher.stopWatching(directory, null)
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").isEmpty() }
-            assertEquals(setOf(), filesWatcher.getCurrentlyWatchedSnapshot())
+            assertEquals(setOf(), filesWatcher.getCurrentlyWatchedLive())
             assertEquals(setOf(), filesWatcher.queryIndex("aaa"))
         }
     }
@@ -56,36 +56,30 @@ class FileWatcherTest {
             val fileChild2 = FileHelper.createOrUpdateFile(tempDir, Paths.get("parent", "child2", "b"), "aaa")
             val fileParent = FileHelper.createOrUpdateFile(tempDir, Paths.get("parent", "a"), "aaa")
 
-            filesWatcher.startWatching(child1Directory)
+            filesWatcher.startWatching(child1Directory, setOf(), setOf(), ProgressTracker())
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").isNotEmpty() }
-            assertEquals(setOf(child1Directory), filesWatcher.getCurrentlyWatchedSnapshot())
-            assertEquals(setOf(fileChild1.toString()), filesWatcher.queryIndex("aaa"))
+            assertEquals(setOf(child1Directory), filesWatcher.getCurrentlyWatchedLive())
+            assertEquals(setOf(fileChild1), filesWatcher.queryIndex("aaa"))
 
-            filesWatcher.startWatching(child2Directory)
+            filesWatcher.startWatching(child2Directory, setOf(), setOf(), ProgressTracker())
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").size == 2 }
-            assertEquals(setOf(child1Directory, child2Directory), filesWatcher.getCurrentlyWatchedSnapshot())
-            assertEquals(setOf(fileChild1.toString(), fileChild2.toString()), filesWatcher.queryIndex("aaa"))
+            assertEquals(setOf(child1Directory, child2Directory), filesWatcher.getCurrentlyWatchedLive())
+            assertEquals(setOf(fileChild1, fileChild2), filesWatcher.queryIndex("aaa"))
 
-            filesWatcher.startWatching(parentDirectory)
+            filesWatcher.startWatching(parentDirectory, setOf(), setOf(), ProgressTracker())
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").size == 3 }
-            assertEquals(setOf(parentDirectory), filesWatcher.getCurrentlyWatchedSnapshot())
-            assertEquals(
-                setOf(fileChild1.toString(), fileChild2.toString(), fileParent.toString()),
-                filesWatcher.queryIndex("aaa")
-            )
+            assertEquals(setOf(parentDirectory), filesWatcher.getCurrentlyWatchedLive())
+            assertEquals(setOf(fileChild1, fileChild2, fileParent), filesWatcher.queryIndex("aaa"))
 
-            filesWatcher.stopWatching(child1Directory)
-            filesWatcher.stopWatching(child2Directory)
+            filesWatcher.stopWatching(child1Directory, null)
+            filesWatcher.stopWatching(child2Directory, null)
             wait(1.seconds)
-            assertEquals(setOf(parentDirectory), filesWatcher.getCurrentlyWatchedSnapshot())
-            assertEquals(
-                setOf(fileChild1.toString(), fileChild2.toString(), fileParent.toString()),
-                filesWatcher.queryIndex("aaa")
-            )
+            assertEquals(setOf(parentDirectory), filesWatcher.getCurrentlyWatchedLive())
+            assertEquals(setOf(fileChild1, fileChild2, fileParent), filesWatcher.queryIndex("aaa"))
 
-            filesWatcher.stopWatching(parentDirectory)
+            filesWatcher.stopWatching(parentDirectory, null)
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").isEmpty() }
-            assertEquals(setOf(), filesWatcher.getCurrentlyWatchedSnapshot())
+            assertEquals(setOf(), filesWatcher.getCurrentlyWatchedLive())
             assertEquals(setOf(), filesWatcher.queryIndex("aaa"))
         }
     }
@@ -101,26 +95,20 @@ class FileWatcherTest {
             val fileChild2 = FileHelper.createOrUpdateFile(tempDir, Paths.get("parent", "child2", "b"), "aaa")
             val fileParent = FileHelper.createOrUpdateFile(tempDir, Paths.get("parent", "a"), "aaa")
 
-            filesWatcher.startWatching(parentDirectory)
+            filesWatcher.startWatching(parentDirectory, setOf(), setOf(), ProgressTracker())
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").isNotEmpty() }
-            assertEquals(setOf(parentDirectory), filesWatcher.getCurrentlyWatchedSnapshot())
-            assertEquals(
-                setOf(fileChild1.toString(), fileChild2.toString(), fileParent.toString()),
-                filesWatcher.queryIndex("aaa")
-            )
+            assertEquals(setOf(parentDirectory), filesWatcher.getCurrentlyWatchedLive())
+            assertEquals(setOf(fileChild1, fileChild2, fileParent), filesWatcher.queryIndex("aaa"))
 
-            filesWatcher.startWatching(child1Directory)
-            filesWatcher.startWatching(child2Directory)
+            filesWatcher.startWatching(child1Directory, setOf(), setOf(), ProgressTracker())
+            filesWatcher.startWatching(child2Directory, setOf(), setOf(), ProgressTracker())
             wait(1.seconds)
-            assertEquals(setOf(parentDirectory), filesWatcher.getCurrentlyWatchedSnapshot())
-            assertEquals(
-                setOf(fileChild1.toString(), fileChild2.toString(), fileParent.toString()),
-                filesWatcher.queryIndex("aaa")
-            )
+            assertEquals(setOf(parentDirectory), filesWatcher.getCurrentlyWatchedLive())
+            assertEquals(setOf(fileChild1, fileChild2, fileParent), filesWatcher.queryIndex("aaa"))
 
-            filesWatcher.stopWatching(parentDirectory)
+            filesWatcher.stopWatching(parentDirectory, null)
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").isEmpty() }
-            assertEquals(setOf(), filesWatcher.getCurrentlyWatchedSnapshot())
+            assertEquals(setOf(), filesWatcher.getCurrentlyWatchedLive())
             assertEquals(setOf(), filesWatcher.queryIndex("aaa"))
         }
     }
@@ -131,19 +119,20 @@ class FileWatcherTest {
             val filesWatcher = FilesWatcherImpl(wordParser, backgroundScope)
             val watchDirectory = FileHelper.createDirectory(tempDir, Paths.get("watch"))
 
-            filesWatcher.startWatching(watchDirectory)
-            assertEquals(setOf(watchDirectory), filesWatcher.getCurrentlyWatchedSnapshot())
+            filesWatcher.startWatching(watchDirectory, setOf(), setOf(), ProgressTracker())
+            waitCondition(2.seconds) { filesWatcher.getCurrentlyWatchedLive().isNotEmpty() }
+            assertEquals(setOf(watchDirectory), filesWatcher.getCurrentlyWatchedLive())
 
             FileHelper.createDirectory(tempDir, Paths.get("watch", "child1"))
-            assertEquals(setOf(watchDirectory), filesWatcher.getCurrentlyWatchedSnapshot())
+            assertEquals(setOf(watchDirectory), filesWatcher.getCurrentlyWatchedLive())
             val file1Child1 = FileHelper.createOrUpdateFile(tempDir, Paths.get("watch", "child1", "a"), "aaa")
             val file2Child1 = FileHelper.createOrUpdateFile(tempDir, Paths.get("watch", "child1", "b"), "bbb")
 
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").isNotEmpty() }
             waitCondition(2.seconds) { filesWatcher.queryIndex("bbb").isNotEmpty() }
-            assertEquals(setOf(watchDirectory), filesWatcher.getCurrentlyWatchedSnapshot())
-            assertEquals(setOf(file1Child1.toString()), filesWatcher.queryIndex("aaa"))
-            assertEquals(setOf(file2Child1.toString()), filesWatcher.queryIndex("bbb"))
+            assertEquals(setOf(watchDirectory), filesWatcher.getCurrentlyWatchedLive())
+            assertEquals(setOf(file1Child1), filesWatcher.queryIndex("aaa"))
+            assertEquals(setOf(file2Child1), filesWatcher.queryIndex("bbb"))
 
             FileHelper.createDirectory(tempDir, Paths.get("watch", "child2"))
             val fileChild2 = FileHelper.createOrUpdateFile(tempDir, Paths.get("watch", "child2", "c"), "aaa")
@@ -151,19 +140,19 @@ class FileWatcherTest {
 
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").size == 2 }
             waitCondition(2.seconds) { filesWatcher.queryIndex("bbb").size == 2 }
-            assertEquals(setOf(watchDirectory), filesWatcher.getCurrentlyWatchedSnapshot())
-            assertEquals(setOf(file1Child1.toString(), fileChild2.toString()), filesWatcher.queryIndex("aaa"))
-            assertEquals(setOf(file2Child1.toString(), fileParent.toString()), filesWatcher.queryIndex("bbb"))
+            assertEquals(setOf(watchDirectory), filesWatcher.getCurrentlyWatchedLive())
+            assertEquals(setOf(file1Child1, fileChild2), filesWatcher.queryIndex("aaa"))
+            assertEquals(setOf(file2Child1, fileParent), filesWatcher.queryIndex("bbb"))
 
             FileHelper.deleteFile(tempDir, Paths.get("watch", "child1", "a"))
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").size == 1 }
-            assertEquals(setOf(fileChild2.toString()), filesWatcher.queryIndex("aaa"))
-            assertEquals(setOf(file2Child1.toString(), fileParent.toString()), filesWatcher.queryIndex("bbb"))
+            assertEquals(setOf(fileChild2), filesWatcher.queryIndex("aaa"))
+            assertEquals(setOf(file2Child1, fileParent), filesWatcher.queryIndex("bbb"))
 
             FileHelper.deleteDirectory(tempDir, Paths.get("watch", "child2"))
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").isEmpty() }
             assertEquals(setOf(), filesWatcher.queryIndex("aaa"))
-            assertEquals(setOf(file2Child1.toString(), fileParent.toString()), filesWatcher.queryIndex("bbb"))
+            assertEquals(setOf(file2Child1, fileParent), filesWatcher.queryIndex("bbb"))
         }
     }
 
@@ -172,7 +161,7 @@ class FileWatcherTest {
         runTest {
             val filesWatcher = FilesWatcherImpl(wordParser, backgroundScope)
             val watchDirectory = FileHelper.createDirectory(tempDir, Paths.get("watch"))
-            filesWatcher.startWatching(watchDirectory)
+            filesWatcher.startWatching(watchDirectory, setOf(), setOf(), ProgressTracker())
 
             val directory = FileHelper.createDirectory(tempDir, Paths.get("watch", "dir"))
             val file1 = FileHelper.createOrUpdateFile(tempDir, Paths.get("watch", "dir", "a"), "aaa")
@@ -180,25 +169,25 @@ class FileWatcherTest {
 
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").isNotEmpty() }
             waitCondition(2.seconds) { filesWatcher.queryIndex("bbb").isNotEmpty() }
-            assertEquals(setOf(file1.toString()), filesWatcher.queryIndex("aaa"))
-            assertEquals(setOf(file2.toString()), filesWatcher.queryIndex("bbb"))
+            assertEquals(setOf(file1), filesWatcher.queryIndex("aaa"))
+            assertEquals(setOf(file2), filesWatcher.queryIndex("bbb"))
 
             val directoryRenamed =
                 Files.move(directory, directory.parent.resolve("dirRenamed"), StandardCopyOption.ATOMIC_MOVE)
-            val file1Renamed = directoryRenamed.resolve("a").normalize().absolutePathString()
-            val file2Renamed = directoryRenamed.resolve("b").normalize().absolutePathString()
+            val file1Renamed = directoryRenamed.resolve("a").toAbsolutePath().normalize()
+            val file2Renamed = directoryRenamed.resolve("b").toAbsolutePath().normalize()
 
             waitCondition(2.seconds) { file1Renamed in filesWatcher.queryIndex("aaa") }
             waitCondition(2.seconds) { file2Renamed in filesWatcher.queryIndex("bbb") }
-            assertEquals(setOf(watchDirectory), filesWatcher.getCurrentlyWatchedSnapshot())
+            assertEquals(setOf(watchDirectory), filesWatcher.getCurrentlyWatchedLive())
             assertEquals(setOf(file1Renamed), filesWatcher.queryIndex("aaa"))
             assertEquals(setOf(file2Renamed), filesWatcher.queryIndex("bbb"))
 
-            filesWatcher.stopWatching(watchDirectory)
+            filesWatcher.stopWatching(watchDirectory, null)
 
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").isEmpty() }
             waitCondition(2.seconds) { filesWatcher.queryIndex("bbb").isEmpty() }
-            assertEquals(setOf(), filesWatcher.getCurrentlyWatchedSnapshot())
+            assertEquals(setOf(), filesWatcher.getCurrentlyWatchedLive())
             assertEquals(setOf(), filesWatcher.queryIndex("aaa"))
             assertEquals(setOf(), filesWatcher.queryIndex("bbb"))
         }
@@ -209,23 +198,23 @@ class FileWatcherTest {
         runTest {
             val filesWatcher = FilesWatcherImpl(wordParser, backgroundScope)
             val file = FileHelper.createOrUpdateFile(tempDir, "a", "aaa")
-            filesWatcher.startWatching(file)
+            filesWatcher.startWatching(file, setOf(), setOf(), ProgressTracker())
 
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").isNotEmpty() }
-            assertEquals(setOf(file), filesWatcher.getCurrentlyWatchedSnapshot())
-            assertEquals(setOf(file.toString()), filesWatcher.queryIndex("aaa"))
+            assertEquals(setOf(file), filesWatcher.getCurrentlyWatchedLive())
+            assertEquals(setOf(file), filesWatcher.queryIndex("aaa"))
 
             FileHelper.createOrUpdateFile(tempDir, "a", "bbb")
 
             waitCondition(2.seconds) { filesWatcher.queryIndex("bbb").isNotEmpty() }
-            assertEquals(setOf(file), filesWatcher.getCurrentlyWatchedSnapshot())
+            assertEquals(setOf(file), filesWatcher.getCurrentlyWatchedLive())
             assertEquals(setOf(), filesWatcher.queryIndex("aaa"))
-            assertEquals(setOf(file.toString()), filesWatcher.queryIndex("bbb"))
+            assertEquals(setOf(file), filesWatcher.queryIndex("bbb"))
 
             FileHelper.deleteFile(tempDir, "a")
 
             waitCondition(2.seconds) { filesWatcher.queryIndex("bbb").isEmpty() }
-            assertEquals(setOf(), filesWatcher.getCurrentlyWatchedSnapshot())
+            assertEquals(setOf(), filesWatcher.getCurrentlyWatchedLive())
             assertEquals(setOf(), filesWatcher.queryIndex("aaa"))
             assertEquals(setOf(), filesWatcher.queryIndex("bbb"))
         }
@@ -246,13 +235,13 @@ class FileWatcherTest {
                 tempDir.resolve("a_symlink_ne"), tempDir.resolve("a_ne")
             )
 
-            filesWatcher.startWatching(symlinkExistingDirToWatch)
-            filesWatcher.startWatching(symlinkNotExistingDirToWatch)
-            filesWatcher.startWatching(symlinkExistingFileToWatch)
-            filesWatcher.startWatching(symlinkNotExistingFileToWatch)
+            filesWatcher.startWatching(symlinkExistingDirToWatch, setOf(), setOf(), ProgressTracker())
+            filesWatcher.startWatching(symlinkNotExistingDirToWatch, setOf(), setOf(), ProgressTracker())
+            filesWatcher.startWatching(symlinkExistingFileToWatch, setOf(), setOf(), ProgressTracker())
+            filesWatcher.startWatching(symlinkNotExistingFileToWatch, setOf(), setOf(), ProgressTracker())
 
             wait(1.seconds)
-            assertEquals(setOf(), filesWatcher.getCurrentlyWatchedSnapshot())
+            assertEquals(setOf(), filesWatcher.getCurrentlyWatchedLive())
             assertEquals(setOf(), filesWatcher.queryIndex("aaa"))
         }
     }
@@ -267,11 +256,12 @@ class FileWatcherTest {
             val aaaFiles = mutableSetOf<Path>()
             val bbbFiles = mutableSetOf<Path>()
 
-            filesWatcher.startWatching(watchDirectory1)
-            filesWatcher.startWatching(watchDirectory2)
-            filesWatcher.startWatching(watchFile)
+            filesWatcher.startWatching(watchDirectory1, setOf(), setOf(), ProgressTracker())
+            filesWatcher.startWatching(watchDirectory2, setOf(), setOf(), ProgressTracker())
+            filesWatcher.startWatching(watchFile, setOf(), setOf(), ProgressTracker())
             aaaFiles.add(watchFile)
-            assertEquals(setOf(watchDirectory1, watchDirectory2, watchFile), filesWatcher.getCurrentlyWatchedSnapshot())
+            waitCondition(2.seconds) { filesWatcher.getCurrentlyWatchedLive().size == 3 }
+            assertEquals(setOf(watchDirectory1, watchDirectory2, watchFile), filesWatcher.getCurrentlyWatchedLive())
 
             FileHelper.createDirectory(tempDir, Paths.get("watch1", "dir1", "dir2"))
             val willUpdateFile = FileHelper.createOrUpdateFile(tempDir, Paths.get("watch1", "dir1", "dir2", "a"), "aaa")
@@ -286,9 +276,9 @@ class FileWatcherTest {
 
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").size == aaaFiles.size }
             waitCondition(2.seconds) { filesWatcher.queryIndex("bbb").size == bbbFiles.size }
-            assertEquals(setOf(watchDirectory1, watchDirectory2, watchFile), filesWatcher.getCurrentlyWatchedSnapshot())
-            assertEquals(aaaFiles.asSequence().map { it.toString() }.toSet(), filesWatcher.queryIndex("aaa"))
-            assertEquals(bbbFiles.asSequence().map { it.toString() }.toSet(), filesWatcher.queryIndex("bbb"))
+            assertEquals(setOf(watchDirectory1, watchDirectory2, watchFile), filesWatcher.getCurrentlyWatchedLive())
+            assertEquals(aaaFiles, filesWatcher.queryIndex("aaa"))
+            assertEquals(bbbFiles, filesWatcher.queryIndex("bbb"))
 
             FileHelper.createOrUpdateFile(tempDir, Paths.get("watch1", "dir1", "dir2", "a"), "bbb")
             aaaFiles.remove(willUpdateFile)
@@ -299,24 +289,27 @@ class FileWatcherTest {
 
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").size == aaaFiles.size }
             waitCondition(2.seconds) { filesWatcher.queryIndex("bbb").size == bbbFiles.size }
-            assertEquals(setOf(watchDirectory1, watchDirectory2, watchFile), filesWatcher.getCurrentlyWatchedSnapshot())
-            assertEquals(aaaFiles.asSequence().map { it.toString() }.toSet(), filesWatcher.queryIndex("aaa"))
-            assertEquals(bbbFiles.asSequence().map { it.toString() }.toSet(), filesWatcher.queryIndex("bbb"))
+            assertEquals(setOf(watchDirectory1, watchDirectory2, watchFile), filesWatcher.getCurrentlyWatchedLive())
+            assertEquals(aaaFiles, filesWatcher.queryIndex("aaa"))
+            assertEquals(bbbFiles, filesWatcher.queryIndex("bbb"))
 
             FileHelper.deleteFile(tempDir, "a")
             bbbFiles.remove(watchFile)
             waitCondition(2.seconds) { filesWatcher.queryIndex("bbb").size == bbbFiles.size }
-            assertEquals(setOf(watchDirectory1, watchDirectory2), filesWatcher.getCurrentlyWatchedSnapshot())
-            assertEquals(bbbFiles.asSequence().map { it.toString() }.toSet(), filesWatcher.queryIndex("bbb"))
+            assertEquals(setOf(watchDirectory1, watchDirectory2), filesWatcher.getCurrentlyWatchedLive())
+            assertEquals(bbbFiles, filesWatcher.queryIndex("bbb"))
 
             FileHelper.deleteDirectory(tempDir, Paths.get("watch1"))
             waitCondition(2.seconds) { filesWatcher.queryIndex("aaa").size == 1 }
             waitCondition(2.seconds) { filesWatcher.queryIndex("bbb").size == 1 }
-            assertEquals(setOf(watchDirectory2), filesWatcher.getCurrentlyWatchedSnapshot())
+            assertEquals(setOf(watchDirectory2), filesWatcher.getCurrentlyWatchedLive())
             assertEquals(
-                setOf(watchDirectory2.resolve(Paths.get("dir3", "d")).toString()), filesWatcher.queryIndex("aaa")
+                setOf(watchDirectory2.resolve(Paths.get("dir3", "d")).toAbsolutePath().normalize()),
+                filesWatcher.queryIndex("aaa")
             )
-            assertEquals(setOf(watchDirectory2.resolve("a").toString()), filesWatcher.queryIndex("bbb"))
+            assertEquals(
+                setOf(watchDirectory2.resolve("a").toAbsolutePath().normalize()), filesWatcher.queryIndex("bbb")
+            )
         }
     }
 }

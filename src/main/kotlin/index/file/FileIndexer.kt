@@ -4,9 +4,13 @@ import java.nio.file.Path
 
 interface FileIndexer {
 
-    suspend fun createOrUpdateFile(path: Path)
+    suspend fun createOrUpdateFile(root: Path, file: Path)
 
-    suspend fun deleteFile(path: Path)
+    suspend fun deleteFile(root: Path, file: Path)
 
-    fun query(word: String): Set<String>
+    fun createRoot(root: Path)
+
+    fun deleteRoot(root: Path)
+
+    fun query(word: String): Set<Path>
 }

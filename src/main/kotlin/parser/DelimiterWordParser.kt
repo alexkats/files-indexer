@@ -3,12 +3,12 @@ package parser
 class DelimiterWordParser(
     vararg delimiters: Char = charArrayOf(' '),
     treatNewlineAsDelimiter: Boolean = true
-) : BufferedWordParser<DelimiterWordParserState>() {
+) : BufferedWordParser<DefaultWordParserState>() {
     private val delimitersSet = if (treatNewlineAsDelimiter) {
         (delimiters + '\n')
     } else delimiters
 
-    override fun processChunk(chunk: String, state: DelimiterWordParserState): DelimiterWordParserState {
+    override fun processChunk(chunk: String, state: DefaultWordParserState): DefaultWordParserState {
         chunk.forEach {
             if (it in delimitersSet && state.currentWord.isNotEmpty()) {
                 state.result.add(state.currentWord.toString())
@@ -20,7 +20,7 @@ class DelimiterWordParser(
         return state
     }
 
-    override fun eof(state: DelimiterWordParserState): DelimiterWordParserState {
+    override fun eof(state: DefaultWordParserState): DefaultWordParserState {
         if (state.currentWord.isNotEmpty()) {
             state.result.add(state.currentWord.toString())
             state.currentWord.clear()
@@ -28,12 +28,5 @@ class DelimiterWordParser(
         return state
     }
 
-    override fun createState() = DelimiterWordParserState(mutableSetOf(), StringBuilder())
-
-    override fun trim(word: String) = word.trim(*delimitersSet)
+    override fun createState() = DefaultWordParserState(mutableSetOf(), StringBuilder())
 }
-
-data class DelimiterWordParserState(
-    override val result: MutableSet<String>,
-    val currentWord: StringBuilder,
-) : WordParserState

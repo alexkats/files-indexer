@@ -1,5 +1,5 @@
 <configuration>
-    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
         <target>System.err</target>
         <encoder>
             <pattern>%r [%thread] %-5level %logger{36} - %msg%n</pattern>
@@ -7,6 +7,6 @@
     </appender>
 
     <root level="debug">
-        <appender-ref ref="STDOUT" />
+        <appender-ref ref="STDERR" />
     </root>
 </configuration>

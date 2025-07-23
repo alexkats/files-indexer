@@ -33,9 +33,8 @@ more fresh version in the target directory). It also redirects
   explicitly forbidden to index file descriptors and devices
   (e.g. `/dev/fd/0` or `/dev/urandom`).
 * It's explicitly forbidden to start/stop watching directories
-  in parallel. It's anyway not possible in REPL, but in case this
-  library will be used externally, there are locks put in place to
-  prevent such scenario. The reason behind this is that there are
+  in parallel. Those calls are chained in a queue that invokes such
+  calls one by one. The reason behind this is that there are
   multiple state changes happening with directory watchers, and some
   weird side effects would be possible if parallel start/stop was
   possible. Please note, that this doesn't block the indexing, and
@@ -50,15 +49,25 @@ more fresh version in the target directory). It also redirects
   explicitly in this case. The side effect of it is that if we
   stop tracking that parent path, child paths won't be tracked
   anymore as well.
-* It's assumed that all files are in the UTF-8 encoding.
+* Several filters are added to increase performance of indexing
+  large directories. One of those is binary file filtering. It
+  first tries to find UTF BOMs, and if none are found, 1KB is read
+  to find if there are any null bytes present. If no BOMs are found
+  and there's at least one null byte found, the file is considered
+  binary.
+* One of the side effect of filtering binary files is that archives
+  are not indexed anymore.
+* It's assumed that all files that are indexed are in the
+  UTF-8 encoding.
 
 ### Possible enhancements in the future
 
+* Make it possible to read contents of an archive (recursively)
+  and apply the same binary filter on files inside and index
+  non-binary files inside the archive.
 * It would be great to give a priority to events that delete
   index if the path is stopped being watched. That would be helpful
   in situations when we index some very large directory and want
   to stop watching it without too much waiting.
-* Show some status/progress bar for current indexing process per
-  path, at least for initial indexing.
 * Register some paths for tracking that don't yet exist on the
   filesystem.

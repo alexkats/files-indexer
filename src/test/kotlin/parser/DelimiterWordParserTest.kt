@@ -13,12 +13,12 @@ import kotlin.test.assertEquals
 class DelimiterWordParserTest {
 
     companion object {
-        data class TestCaseData<T>(
+        data class TestCaseData(
             val text: String,
             val delimiters: CharArray,
-            val expectedDelimiterLineByLine: T,
-            val expectedDelimiter: T,
-            val expectedDelimiterNewlineIsDelimiter: T,
+            val expectedDelimiterLineByLine: Set<String>,
+            val expectedDelimiter: Set<String>,
+            val expectedDelimiterNewlineIsDelimiter: Set<String>,
         ) {
             private fun String.replaceWithExplicitWhitespaces() =
                 replace(' ', '\u2423').replace("\n", "\\n")
@@ -77,71 +77,11 @@ class DelimiterWordParserTest {
                 expectedDelimiterNewlineIsDelimiter = setOf("aaa", "bbb")
             ),
         )
-
-        @JvmStatic
-        fun trimTestDataSource() = listOf(
-            TestCaseData(
-                text = " abc",
-                delimiters = charArrayOf(' '),
-                expectedDelimiterLineByLine = "abc",
-                expectedDelimiter = "abc",
-                expectedDelimiterNewlineIsDelimiter = "abc"
-            ),
-            TestCaseData(
-                text = " abc   ",
-                delimiters = charArrayOf(' '),
-                expectedDelimiterLineByLine = "abc",
-                expectedDelimiter = "abc",
-                expectedDelimiterNewlineIsDelimiter = "abc"
-            ),
-            TestCaseData(
-                text = " abc \n ",
-                delimiters = charArrayOf(' '),
-                expectedDelimiterLineByLine = "abc \n",
-                expectedDelimiter = "abc \n",
-                expectedDelimiterNewlineIsDelimiter = "abc"
-            ),
-            TestCaseData(
-                text = " abc \n ",
-                delimiters = charArrayOf(' ', '\n'),
-                expectedDelimiterLineByLine = "abc",
-                expectedDelimiter = "abc",
-                expectedDelimiterNewlineIsDelimiter = "abc"
-            ),
-            TestCaseData(
-                text = " abc \n ",
-                delimiters = charArrayOf(' ', '\n', 'a'),
-                expectedDelimiterLineByLine = "bc",
-                expectedDelimiter = "bc",
-                expectedDelimiterNewlineIsDelimiter = "bc"
-            ),
-            TestCaseData(
-                text = "     ",
-                delimiters = charArrayOf(' '),
-                expectedDelimiterLineByLine = "",
-                expectedDelimiter = "",
-                expectedDelimiterNewlineIsDelimiter = ""
-            ),
-            TestCaseData(
-                text = "  \n ",
-                delimiters = charArrayOf(' '),
-                expectedDelimiterLineByLine = "\n",
-                expectedDelimiter = "\n",
-                expectedDelimiterNewlineIsDelimiter = ""
-            ),
-            TestCaseData(
-                text = "  \n ",
-                delimiters = charArrayOf(' ', '\n'),
-                expectedDelimiterLineByLine = "",
-                expectedDelimiter = "",
-                expectedDelimiterNewlineIsDelimiter = ""
-            ),
-        )
     }
 
     @ParameterizedTest
     @MethodSource("splitTestDataSource")
-    fun testSplitting(testCaseData: TestCaseData<Set<String>>) {
+    fun testSplitting(testCaseData: TestCaseData) {
         val text = testCaseData.text
         val delimiters = testCaseData.delimiters
         assertEquals(
@@ -156,19 +96,6 @@ class DelimiterWordParserTest {
             testCaseData.expectedDelimiterNewlineIsDelimiter,
             DelimiterWordParser(*delimiters).splitAll(text.reader())
         )
-    }
-
-    @ParameterizedTest
-    @MethodSource("trimTestDataSource")
-    fun testTrimming(testCaseData: TestCaseData<String>) {
-        val text = testCaseData.text
-        val delimiters = testCaseData.delimiters
-        assertEquals(testCaseData.expectedDelimiterLineByLine, DelimiterLineByLineWordParser(*delimiters).trim(text))
-        assertEquals(
-            testCaseData.expectedDelimiter,
-            DelimiterWordParser(*delimiters, treatNewlineAsDelimiter = false).trim(text)
-        )
-        assertEquals(testCaseData.expectedDelimiterNewlineIsDelimiter, DelimiterWordParser(*delimiters).trim(text))
     }
 
     @OptIn(DelicateCoroutinesApi::class, ExperimentalCoroutinesApi::class)

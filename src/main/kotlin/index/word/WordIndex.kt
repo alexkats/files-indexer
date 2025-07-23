@@ -1,14 +1,20 @@
 package index.word
 
-import index.hash.FileHash
+import java.nio.file.Path
 
 interface WordIndex {
 
-    fun indexFile(fileName: String, hash: FileHash, getUpdatedHash: () -> FileHash)
+    fun indexFile(root: Path, file: Path, timestamp: Long)
 
-    fun deleteIndex(hash: FileHash)
+    fun deleteIndexForFile(root: Path, file: Path)
 
-    fun isFileHashIndexed(hash: FileHash): Boolean
+    fun createIndexForRoot(root: Path)
 
-    fun queryIndex(word: String): Set<FileHash>
+    fun deleteIndexForRoot(root: Path)
+
+    fun isFileIndexed(root: Path, file: Path): Boolean
+
+    fun isFileIndexedWithTimestamp(root: Path, file: Path, timestamp: Long): Boolean
+
+    fun queryIndex(word: String): Set<Path>
 }

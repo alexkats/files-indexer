@@ -22,6 +22,8 @@ object FileHelper {
 
     fun createOrUpdateFile(rootPath: Path, path: Path, content: String): Path {
         val realPath = validateAndGetRealPath(rootPath, path)
+        // This is to make sure that we'll have different modification timestamps for all files
+        Thread.sleep(1)
         if (!realPath.exists()) {
             Files.createFile(realPath)
         }

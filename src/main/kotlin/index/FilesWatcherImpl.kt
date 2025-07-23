@@ -3,40 +3,48 @@ package index
 import index.file.EventType
 import index.file.FileChangeEvent
 import index.file.FileIndexerImpl
-import io.methvin.watcher.DirectoryChangeEvent
-import io.methvin.watcher.DirectoryWatcher
+import index.filter.AggregateFilter
+import index.filter.BinaryFileFilter
+import index.filter.DirectoryNameFilter
+import index.filter.FileExtensionFilter
+import index.filter.IndexingFilter
+import index.filter.SymlinkFilter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.slf4j.LoggerFactory
 import parser.WordParser
+import util.ProgressStatus
+import util.ProgressTracker
 import java.nio.file.Path
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
+import java.util.zip.ZipInputStream
 import kotlin.coroutines.CoroutineContext
+import kotlin.io.path.inputStream
 import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.isSymbolicLink
 import kotlin.io.path.notExists
-import kotlin.io.path.walk
-import kotlin.time.Duration
-import kotlin.time.TimeMark
-import kotlin.time.TimeSource
+import kotlin.io.path.useDirectoryEntries
 
 class FilesWatcherImpl(
-    private val wordParser: WordParser,
-    scope: CoroutineScope,
-    private val startingTimeMark: TimeMark = TimeSource.Monotonic.markNow()
+    wordParser: WordParser,
+    scope: CoroutineScope
 ) : FilesWatcher {
 
     companion object {
         private val LOGGER = LoggerFactory.getLogger(FilesWatcherImpl::class.simpleName)
+
+        private val COMMON_FILTERS = arrayOf(SymlinkFilter(), BinaryFileFilter())
+        private const val DIRECTORY_SCAN_PARALLELISM_LEVEL = 8
     }
 
     private val job = SupervisorJob(scope.coroutineContext[Job.Key])
@@ -44,49 +52,167 @@ class FilesWatcherImpl(
         get() = job + Dispatchers.Default
 
     private val fileChangeEventsChannel = Channel<FileChangeEvent>(Channel.Factory.UNLIMITED)
-    private val fileIndexer = FileIndexerImpl(wordParser, fileChangeEventsChannel, this, startingTimeMark)
-    private val directoryWatchers = ConcurrentHashMap<Path, DirectoryWatcher>()
+    private val watchOperationsChannel = Channel<WatchOperation<*>>(Channel.UNLIMITED)
 
-    private val directoryWatchOperationMutex = Mutex()
+    private val fileIndexer = FileIndexerImpl(wordParser, fileChangeEventsChannel, this)
+    private val directoryWatchers = ConcurrentHashMap<Path, FilteringDirectoryWatcher>()
 
-    override suspend fun startWatching(path: Path): WatchOperationResult = directoryWatchOperationMutex.withLock {
+
+    init {
+        launch {
+            for (msg in watchOperationsChannel) {
+                when (msg) {
+                    is WatchOperation.Start -> startWatchingImpl(msg.data)
+                    is WatchOperation.Stop -> stopWatchingImpl(msg.data.root)
+                }
+            }
+        }
+    }
+
+    // Won't suspend in practice, because the channel is unlimited
+    override suspend fun startWatching(
+        path: Path,
+        excludePatterns: Set<String>,
+        extensions: Set<String>,
+        progressTracker: ProgressTracker
+    ): WatchOperationResult {
         val (normalizedPath, reason) = path.validatePathAndNormalize()
         if (normalizedPath == null) {
             return WatchOperationResult(false, reason)
         }
+
         val (shouldAbort, comment) = resolveDependenciesAndShouldAbort(normalizedPath)
-        if (shouldAbort) {
-            return WatchOperationResult(false, comment)
+        return if (shouldAbort) {
+            WatchOperationResult(false, comment)
+        } else {
+            watchOperationsChannel.send(
+                WatchOperation.Start(
+                    WatchStartOperationData(
+                        normalizedPath,
+                        excludePatterns,
+                        extensions,
+                        progressTracker
+                    )
+                )
+            )
+            WatchOperationResult(true, comment)
         }
-        val directoryWatcher = createDirectoryWatcher(normalizedPath)
-        // We use an earlier timestamp for walking existing files on purpose.
-        // If we have some events coming, and then for some reason some files will be processed later, they shouldn't
-        // have precedence over events being watched, as that state was more accurate of we had an event on such files.
-        val timestamp = startingTimeMark.elapsedNow()
+    }
+
+    private suspend fun startWatchingImpl(data: WatchStartOperationData) {
+        val filter = AggregateFilter(
+            listOfNotNull(
+                *COMMON_FILTERS,
+                if (data.excludePatterns.isNotEmpty()) DirectoryNameFilter(data.excludePatterns) else null,
+                if (data.extensions.isNotEmpty()) FileExtensionFilter(data.extensions) else null
+            )
+        )
+        LOGGER.info("Starting watching")
+        fileChangeEventsChannel.send(FileChangeEvent(data.root, data.root, EventType.CREATE_ROOT))
+        data.progressTracker.status = ProgressStatus.INITIALIZING_WATCHER
+        val directoryWatcher = FilteringDirectoryWatcher(
+            data.root,
+            filter,
+            data.progressTracker,
+            ::startIndexingFile,
+            ::stopIndexingFile
+        )
+        directoryWatchers += data.root to directoryWatcher
         directoryWatcher.watchAsync()
-        normalizedPath.walk().forEach {
-            launch {
-                startIndexingFile(it, timestamp)
+        LOGGER.info("Started watching")
+        data.progressTracker.status = ProgressStatus.INDEXING
+
+        if (data.root.isDirectory()) {
+            scanDirectoriesAndStartIndexing(data, filter)
+        } else {
+            if (filter.accept(data.root)) {
+                data.progressTracker.fileAdded()
+                data.progressTracker.allFilesAdded()
+                startIndexingFile(data.root, data.root) { data.progressTracker.fileIndexed() }
+            } else {
+                data.progressTracker.allFilesAdded()
             }
         }
-        WatchOperationResult(true, comment)
     }
 
-    override suspend fun stopWatching(path: Path): WatchOperationResult = directoryWatchOperationMutex.withLock {
-        stopWatchingUnlocked(path)
+    private suspend fun scanDirectoriesAndStartIndexing(data: WatchStartOperationData, filter: IndexingFilter) {
+        val pathsQueue = Channel<Path>(Channel.UNLIMITED)
+        pathsQueue.send(data.root)
+        val activeDirs = AtomicLong(1L)
+        val workers = List(DIRECTORY_SCAN_PARALLELISM_LEVEL) {
+            launch(Dispatchers.IO) {
+                for (path in pathsQueue) {
+                    try {
+                        if (path.isDirectory()) {
+                            path.useDirectoryEntries {
+                                it.forEach { entry ->
+                                    if (filter.accept(entry)) {
+                                        activeDirs.incrementAndGet()
+                                        pathsQueue.send(entry)
+                                    }
+                                }
+                            }
+                        } else {
+                            data.progressTracker.fileAdded()
+                            startIndexingFile(data.root, path) {
+                                data.progressTracker.fileIndexed()
+                                LOGGER.debug(
+                                    "Path {} progress: {}",
+                                    data.root,
+                                    data.progressTracker.getPrintableStatus()
+                                )
+                            }
+                        }
+                    } finally {
+                        if (activeDirs.decrementAndGet() == 0L) {
+                            pathsQueue.close()
+                        }
+                    }
+                }
+            }
+        }
+        workers.joinAll()
+        data.progressTracker.allFilesAdded()
     }
 
-    override fun queryIndex(word: String): Set<String> {
-        val trimmedWord = wordParser.trim(word)
-        return if (trimmedWord.isNotEmpty()) fileIndexer.query(word) else setOf()
+    // Won't suspend in practice, because the channel is unlimited
+    override suspend fun stopWatching(path: Path, progressTracker: ProgressTracker?): WatchOperationResult {
+        val normalizedPath = path.toAbsolutePath().normalize()
+        val result = if (directoryWatchers.containsKey(normalizedPath)) {
+            watchOperationsChannel.send(WatchOperation.Stop(WatchStopOperationData(normalizedPath)))
+            progressTracker?.status = ProgressStatus.REMOVE_QUEUED
+            WatchOperationResult(true, "")
+        } else WatchOperationResult(false, "This path wasn't tracked before, ignoring")
+        return result
+    }
+
+    private suspend fun stopWatchingImpl(root: Path) {
+        val watcher = directoryWatchers.remove(root)
+        watcher?.close()
+        return watcher?.progressTracker?.let {
+            it.status = ProgressStatus.REMOVING
+            fileChangeEventsChannel.send(
+                FileChangeEvent(
+                    root,
+                    root,
+                    EventType.DELETE_ROOT
+                ) {
+                    it.status = ProgressStatus.REMOVED
+                }
+            )
+        } ?: LOGGER.debug("Didn't watch the path \"{}\" before", root)
+    }
+
+    override fun queryIndex(word: String): Set<Path> {
+        return if (word.isNotEmpty()) fileIndexer.query(word) else setOf()
     }
 
     override fun getCurrentlyWatchedLive(): Set<Path> {
         return Collections.unmodifiableSet(directoryWatchers.keys)
     }
 
-    override fun getCurrentlyWatchedSnapshot(): Set<Path> {
-        return directoryWatchers.keys.toSet()
+    override fun getCurrentWatchesPrintableInfo(): List<String> {
+        return directoryWatchers.map { it.value.getPrintableInfo() }.toList()
     }
 
     override fun close() {
@@ -96,26 +222,32 @@ class FilesWatcherImpl(
 
     private fun Path.validatePathAndNormalize(): Pair<Path?, String> {
         val normalizedPath = toAbsolutePath().normalize()
-        if (normalizedPath.notExists()) {
-            LOGGER.debug("No path exists: {}", normalizedPath)
-            return null to "Path doesn't exist"
+        return when {
+            normalizedPath.notExists() -> {
+                LOGGER.debug("No path exists: {}", normalizedPath)
+                null to "Path doesn't exist"
+            }
+
+            directoryWatchers.containsKey(normalizedPath) -> {
+                LOGGER.debug("Already watching this path: {}", normalizedPath)
+                null to "Path is already watched, ignoring"
+            }
+
+            normalizedPath.isSymbolicLink() -> {
+                LOGGER.debug("Symbolic links watching is not supported: {}", normalizedPath)
+                null to "Symbolic links can't be watched, ignoring"
+            }
+
+            !(normalizedPath.isRegularFile() || normalizedPath.isDirectory()) -> {
+                LOGGER.debug("Path is neither a regular file not a directory, won't track: {}", normalizedPath)
+                null to "Path is neither a regular file nor a directory, ignoring"
+            }
+
+            else -> normalizedPath to ""
         }
-        if (directoryWatchers.containsKey(normalizedPath)) {
-            LOGGER.debug("Already watching this path: {}", normalizedPath)
-            return null to "Path is already watched, ignoring"
-        }
-        if (normalizedPath.isSymbolicLink()) {
-            LOGGER.debug("Symbolic links watching is not supported: {}", normalizedPath)
-            return null to "Symbolic links can't be watched, ignoring"
-        }
-        if (!(normalizedPath.isRegularFile() || normalizedPath.isDirectory())) {
-            LOGGER.debug("Path is neither a regular file not a directory, won't track: {}", normalizedPath)
-            return null to "Path is neither a regular file not a directory, ignoring"
-        }
-        return normalizedPath to ""
     }
 
-    private fun resolveDependenciesAndShouldAbort(path: Path): Pair<Boolean, String> {
+    private suspend fun resolveDependenciesAndShouldAbort(path: Path): Pair<Boolean, String> {
         val possibleParent = directoryWatchers.keys.firstOrNull { path.startsWith(it) }
         if (possibleParent != null) {
             LOGGER.debug(
@@ -132,72 +264,24 @@ class FilesWatcherImpl(
                 children.joinToString(),
                 path
             )
-            "Path(s) ${children.joinToString()} will stop being watched explicitly, they will be tracked by watching the provided path"
+            "Path(s) ${children.joinToString()} will stop being watched explicitly, " +
+                "they will be tracked by watching the provided path"
         } else ""
-        children.forEach { stopWatchingUnlocked(it) }
+        children.forEach { stopWatchingImpl(it) }
         return false to comment
     }
 
-    private fun createDirectoryWatcher(path: Path): DirectoryWatcher {
-        val watcher = DirectoryWatcher.builder()
-            .path(path)
-            .listener { event ->
-                val timestamp = startingTimeMark.elapsedNow()
-                when (event.eventType()) {
-                    DirectoryChangeEvent.EventType.CREATE, DirectoryChangeEvent.EventType.MODIFY -> launch {
-                        startIndexingFile(event.path(), timestamp)
-                    }
-
-                    DirectoryChangeEvent.EventType.DELETE -> launch {
-                        stopIndexingFile(path, event.path(), true, timestamp)
-                    }
-
-                    DirectoryChangeEvent.EventType.OVERFLOW -> LOGGER.error("Overflow with ${event.path()} for watching $path")
-                }
-            }
-            // comment why
-            .fileHashing(false)
-            .build()
-        directoryWatchers += path to watcher
-        return watcher
+    // Won't suspend in practice, because the channel is unlimited
+    private suspend fun startIndexingFile(root: Path, path: Path, onFinish: () -> Unit = {}) = coroutineScope {
+        fileChangeEventsChannel.send(FileChangeEvent(root, path, EventType.UPDATE, onFinish))
     }
 
-    private fun stopWatchingUnlocked(path: Path): WatchOperationResult {
-        val normalizedPath = path.toAbsolutePath().normalize()
-        return directoryWatchers.remove(normalizedPath)?.close()?.let {
-            // can have a data race here if some files (???)
-            normalizedPath.walk().forEach {
-                launch {
-                    stopIndexingFile(normalizedPath, it, false, startingTimeMark.elapsedNow())
-                }
-            }
-            WatchOperationResult(true, "")
-        } ?: WatchOperationResult(false, "This path wasn't tracked before, ignoring").also {
-            LOGGER.debug("Didn't watch the path \"{}\" before", normalizedPath)
-        }
-    }
-
-    // Won't suspend in practice, because my channel is unlimited
-    private suspend fun startIndexingFile(path: Path, timestamp: Duration) = coroutineScope {
-        fileChangeEventsChannel.send(
-            FileChangeEvent(
-                path,
-                EventType.UPDATE,
-                timestamp,
-            )
-        )
-    }
-
-    // Won't suspend in practice, because my channel is unlimited
-    private suspend fun stopIndexingFile(
-        trackPath: Path,
-        path: Path,
-        wasDeleted: Boolean,
-        timestamp: Duration
-    ): Unit = coroutineScope {
-        fileChangeEventsChannel.send(FileChangeEvent(path, EventType.DELETE, timestamp))
-        if (wasDeleted && trackPath == path) {
-            stopWatching(trackPath)
+    // Won't suspend in practice, because the channel is unlimited
+    private suspend fun stopIndexingFile(root: Path, path: Path): Unit = coroutineScope {
+        if (root == path) {
+            stopWatchingImpl(root)
+        } else {
+            fileChangeEventsChannel.send(FileChangeEvent(root, path, EventType.DELETE))
         }
     }
 }
