@@ -76,7 +76,7 @@ class FileIndexerImpl(
 
     override suspend fun deleteFile(root: Path, file: Path) {
         printLogLine(file, "Deleted")
-        // If a regular file exists, it means the file was recreated and we got into a race between create and delete
+        // If a regular file exists, it means the file was recreated, and we got into a race between create and delete
         // events. To prevent deleting index in such a case, we check if the file exists on the filesystem.
         if (file.exists() && file.isRegularFile()) {
             LOGGER.debug("File {} exists, won't delete index for it", file)

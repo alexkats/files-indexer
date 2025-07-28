@@ -12,12 +12,13 @@ import java.nio.file.Path
 class FilteringDirectoryWatcher(
     private val root: Path,
     private val filter: IndexingFilter,
-    val progressTracker: ProgressTracker,
+    private val progressTracker: ProgressTracker,
     private val startIndexingFile: suspend (Path, Path) -> Unit,
-    private val stopIndexingFile: suspend (Path, Path) -> Unit
+    private val stopIndexingFile: suspend (Path, Path) -> Unit,
+    private val onClose: suspend (ProgressTracker) -> Unit
 ) {
 
-    val watcher = createDirectoryWatcher()
+    private val watcher = createDirectoryWatcher()
 
     companion object {
         private val LOGGER = LoggerFactory.getLogger(FilteringDirectoryWatcher::class.simpleName)
@@ -27,8 +28,9 @@ class FilteringDirectoryWatcher(
         watcher.watchAsync()
     }
 
-    fun close() {
+    suspend fun close() {
         watcher.close()
+        onClose(progressTracker)
     }
 
     fun getPrintableInfo(): String {

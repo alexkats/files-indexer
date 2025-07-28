@@ -2,13 +2,9 @@ package terminal.statusbar
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
 import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.newSingleThreadContext
 import org.jline.terminal.Terminal
 import util.ProgressStatus
 import util.ProgressTracker
@@ -16,7 +12,6 @@ import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Duration.Companion.seconds
 
 class DefaultStatusBarRenderer(
     private val terminal: Terminal,
@@ -34,7 +29,7 @@ class DefaultStatusBarRenderer(
     private val dispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val job = scope.launch(dispatcher, start = CoroutineStart.LAZY) {
         while (true) {
-            cleanUpStatusMapNew()
+            cleanupInactiveRoots()
             renderStatusBar(terminal, reservedHeight)
             delay(500.milliseconds)
         }
@@ -47,7 +42,7 @@ class DefaultStatusBarRenderer(
         job.start()
     }
 
-    private fun cleanUpStatusMapNew() {
+    private fun cleanupInactiveRoots() {
         for (path in rootToProgress.keys) {
             rootToProgress.compute(path) { _, v ->
                 v?.let { if (it.status == ProgressStatus.REMOVED) null else v }

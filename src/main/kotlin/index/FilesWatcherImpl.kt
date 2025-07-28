@@ -26,9 +26,7 @@ import java.nio.file.Path
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
-import java.util.zip.ZipInputStream
 import kotlin.coroutines.CoroutineContext
-import kotlin.io.path.inputStream
 import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.isSymbolicLink
@@ -116,7 +114,18 @@ class FilesWatcherImpl(
             data.progressTracker,
             ::startIndexingFile,
             ::stopIndexingFile
-        )
+        ) {
+            it.status = ProgressStatus.REMOVING
+            fileChangeEventsChannel.send(
+                FileChangeEvent(
+                    data.root,
+                    data.root,
+                    EventType.DELETE_ROOT
+                ) {
+                    it.status = ProgressStatus.REMOVED
+                }
+            )
+        }
         directoryWatchers += data.root to directoryWatcher
         directoryWatcher.watchAsync()
         LOGGER.info("Started watching")
@@ -188,19 +197,7 @@ class FilesWatcherImpl(
 
     private suspend fun stopWatchingImpl(root: Path) {
         val watcher = directoryWatchers.remove(root)
-        watcher?.close()
-        return watcher?.progressTracker?.let {
-            it.status = ProgressStatus.REMOVING
-            fileChangeEventsChannel.send(
-                FileChangeEvent(
-                    root,
-                    root,
-                    EventType.DELETE_ROOT
-                ) {
-                    it.status = ProgressStatus.REMOVED
-                }
-            )
-        } ?: LOGGER.debug("Didn't watch the path \"{}\" before", root)
+        watcher?.close() ?: LOGGER.debug("Didn't watch the path \"{}\" before", root)
     }
 
     override fun queryIndex(word: String): Set<Path> {
@@ -217,7 +214,9 @@ class FilesWatcherImpl(
 
     override fun close() {
         job.cancel()
-        directoryWatchers.forEach { _, watcher -> watcher.close() }
+        launch {
+            directoryWatchers.forEach { (_, watcher) -> watcher.close() }
+        }
     }
 
     private fun Path.validatePathAndNormalize(): Pair<Path?, String> {
