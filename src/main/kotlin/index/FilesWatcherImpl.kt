@@ -106,7 +106,7 @@ class FilesWatcherImpl(
             )
         )
         LOGGER.info("Starting watching")
-        fileChangeEventsChannel.send(FileChangeEvent(data.root, data.root, EventType.CREATE_ROOT))
+        fileChangeEventsChannel.send(FileChangeEvent(data.root, data.root, 0L, EventType.CREATE_ROOT))
         data.progressTracker.status = ProgressStatus.INITIALIZING_WATCHER
         val directoryWatcher = FilteringDirectoryWatcher(
             data.root,
@@ -120,6 +120,7 @@ class FilesWatcherImpl(
                 FileChangeEvent(
                     data.root,
                     data.root,
+                    0L,
                     EventType.DELETE_ROOT
                 ) {
                     it.status = ProgressStatus.REMOVED
@@ -272,7 +273,15 @@ class FilesWatcherImpl(
 
     // Won't suspend in practice, because the channel is unlimited
     private suspend fun startIndexingFile(root: Path, path: Path, onFinish: () -> Unit = {}) = coroutineScope {
-        fileChangeEventsChannel.send(FileChangeEvent(root, path, EventType.UPDATE, onFinish))
+        fileChangeEventsChannel.send(
+            FileChangeEvent(
+                root,
+                path,
+                path.toFile().lastModified(),
+                EventType.UPDATE,
+                onFinish
+            )
+        )
     }
 
     // Won't suspend in practice, because the channel is unlimited
@@ -280,7 +289,7 @@ class FilesWatcherImpl(
         if (root == path) {
             stopWatchingImpl(root)
         } else {
-            fileChangeEventsChannel.send(FileChangeEvent(root, path, EventType.DELETE))
+            fileChangeEventsChannel.send(FileChangeEvent(root, path, 0L, EventType.DELETE))
         }
     }
 }

@@ -39,14 +39,14 @@ class FileIndexerImpl(
                 when (msg.eventType) {
                     EventType.UPDATE, EventType.DELETE -> launch(Dispatchers.IO) {
                         msg.file.withFileLock {
-                            msg.eventType.opFunc(this@FileIndexerImpl, msg.root, msg.file)
+                            msg.eventType.opFunc(this@FileIndexerImpl, msg.root, msg.file, msg.timestamp)
                             msg.onFinish()
                         }
                     }
 
                     EventType.CREATE_ROOT,
                     EventType.DELETE_ROOT -> {
-                        msg.eventType.opFunc(this@FileIndexerImpl, msg.root, msg.file)
+                        msg.eventType.opFunc(this@FileIndexerImpl, msg.root, msg.file, msg.timestamp)
                         msg.onFinish()
                     }
                 }
@@ -63,9 +63,8 @@ class FileIndexerImpl(
         }
     }
 
-    override suspend fun createOrUpdateFile(root: Path, file: Path) {
+    override suspend fun createOrUpdateFile(root: Path, file: Path, timestamp: Long) {
         printLogLine(file, "Created or updated")
-        val timestamp = file.toFile().lastModified()
         if (file.notExists() || timestamp == 0L) {
             LOGGER.debug("File {} was already deleted", file)
             return

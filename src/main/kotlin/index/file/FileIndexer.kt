@@ -4,7 +4,7 @@ import java.nio.file.Path
 
 interface FileIndexer {
 
-    suspend fun createOrUpdateFile(root: Path, file: Path)
+    suspend fun createOrUpdateFile(root: Path, file: Path, timestamp: Long)
 
     suspend fun deleteFile(root: Path, file: Path)
 

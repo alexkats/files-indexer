@@ -124,7 +124,12 @@ class HashTableWordIndex(private val wordParser: WordParser) : WordIndex {
 
     override fun queryIndex(word: String): Set<Path> {
         LOGGER.trace("Querying index for word \"{}\"", word)
-        return index[word]?.toSet() ?: setOf()
+        var snapshot = setOf<Path>()
+        index.computeIfPresent(word) { _, v ->
+            snapshot = v.toSet()
+            v
+        }
+        return snapshot
     }
 
     @JvmInline

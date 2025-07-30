@@ -22,7 +22,7 @@ class FileIndexerTest {
             val channel = Channel<FileChangeEvent>(Channel.Factory.UNLIMITED)
             val fileIndexer = FileIndexerImpl(wordParser, channel, backgroundScope)
             fileIndexer.createRoot(tempDir)
-            fileIndexer.createOrUpdateFile(tempDir, file)
+            fileIndexer.createOrUpdateFile(tempDir, file, file.toFile().lastModified())
 
             assertEquals(setOf(file), fileIndexer.query("aaa"))
         }
@@ -35,7 +35,7 @@ class FileIndexerTest {
             val channel = Channel<FileChangeEvent>(Channel.Factory.UNLIMITED)
             val fileIndexer = FileIndexerImpl(wordParser, channel, backgroundScope)
             fileIndexer.createRoot(tempDir)
-            fileIndexer.createOrUpdateFile(tempDir, file)
+            fileIndexer.createOrUpdateFile(tempDir, file, file.toFile().lastModified())
 
             assertEquals(setOf(file), fileIndexer.query("aaa"))
             FileHelper.deleteFile(tempDir, fileName = "a")
@@ -55,7 +55,7 @@ class FileIndexerTest {
             val channel = Channel<FileChangeEvent>(Channel.Factory.UNLIMITED)
             val fileIndexer = FileIndexerImpl(wordParser, channel, backgroundScope)
             fileIndexer.createRoot(tempDir)
-            fileIndexer.createOrUpdateFile(tempDir, file)
+            fileIndexer.createOrUpdateFile(tempDir, file, file.toFile().lastModified())
 
             assertEquals(setOf(file), fileIndexer.query("aaa"))
             fileIndexer.deleteFile(tempDir, file)
@@ -71,11 +71,11 @@ class FileIndexerTest {
             val channel = Channel<FileChangeEvent>(Channel.Factory.UNLIMITED)
             val fileIndexer = FileIndexerImpl(wordParser, channel, backgroundScope)
             fileIndexer.createRoot(tempDir)
-            fileIndexer.createOrUpdateFile(tempDir, file)
+            fileIndexer.createOrUpdateFile(tempDir, file, file.toFile().lastModified())
 
             assertEquals(setOf(file), fileIndexer.query("aaa"))
             FileHelper.createOrUpdateFile(tempDir, fileName = "a", content = "bbb")
-            fileIndexer.createOrUpdateFile(tempDir, file)
+            fileIndexer.createOrUpdateFile(tempDir, file, file.toFile().lastModified())
 
             assertEquals(setOf(), fileIndexer.query("aaa"))
             assertEquals(setOf(file), fileIndexer.query("bbb"))
@@ -93,8 +93,8 @@ class FileIndexerTest {
             fileIndexer.createRoot(tempDir)
 
             // Start tracking
-            fileIndexer.createOrUpdateFile(tempDir, file1)
-            fileIndexer.createOrUpdateFile(tempDir, file2)
+            fileIndexer.createOrUpdateFile(tempDir, file1, file1.toFile().lastModified())
+            fileIndexer.createOrUpdateFile(tempDir, file2, file2.toFile().lastModified())
 
             assertEquals(setOf(file1, file2), fileIndexer.query("aaa"))
             FileHelper.deleteFile(tempDir, "a")
@@ -110,7 +110,7 @@ class FileIndexerTest {
             assertEquals(setOf(), fileIndexer.query("aaa"))
 
             // Check that we have a result after starting tracking the file
-            fileIndexer.createOrUpdateFile(tempDir, file3)
+            fileIndexer.createOrUpdateFile(tempDir, file3, file3.toFile().lastModified())
             assertEquals(setOf(file3), fileIndexer.query("aaa"))
         }
     }
